@@ -92,11 +92,12 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
     lora_r = 4 if not enhance_lora else 128
     lora_alpha = 32 if not enhance_lora else 64
     max_train_steps = min(photo_num * 200, 800)
+    os.environ['PYTHONPATH'] = '.'
     if ensemble:
         command = [ 'accelerate', 'launch', 'facechain/train_text_to_image_lora.py',
                     f'--pretrained_model_name_or_path={base_model_path}',
                     f'--output_dataset_name={output_img_dir}',
-                    f'--caption_column="text"',
+                    f'--caption_column=text',
                     f'--resolution=512',
                     f'--random_flip',
                     f'--train_batch_size=1',
@@ -104,18 +105,18 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
                     f'--max_train_steps={max_train_steps}',
                     f'--checkpointing_steps=100',
                     f'--learning_rate=1e-04',
-                    f'--lr_scheduler="constant"',
+                    f'--lr_scheduler=constant',
                     f'--lr_warmup_steps=0',
                     f'--seed=42',
                     f'--output_dir="{work_dir}"',
                     f'--lora_r={lora_r}',
                     f'--lora_alpha={lora_alpha}' ,
-                    f'--validation_prompt="{validation_prompt}"',
-                    f'--template_dir="resources/inpaint_template"',
+                    f'--validation_prompt={validation_prompt}',
+                    f'--template_dir=resources/inpaint_template',
                     f'--template_mask',
                     f'--merge_best_lora_based_face_id',
-                    f'--revision="{revision}"',
-                    f'--sub_path="{sub_path}"',
+                    f'--revision={revision}',
+                    f'--sub_path={sub_path}',
                     f'--validation_steps=100 '
                    ]
         if platform.system() == 'Windows':
