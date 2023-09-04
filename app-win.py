@@ -108,7 +108,7 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
                     f'--lr_scheduler=constant',
                     f'--lr_warmup_steps=0',
                     f'--seed=42',
-                    f'--output_dir="{work_dir}"',
+                    f'--output_dir={work_dir}',
                     f'--lora_r={lora_r}',
                     f'--lora_alpha={lora_alpha}' ,
                     f'--validation_prompt={validation_prompt}',
