@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import platform
 import datetime
+import json
 
 import slugify
 import time
@@ -93,10 +94,13 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
     lora_alpha = 32 if not enhance_lora else 64
     max_train_steps = min(photo_num * 200, 800)
     os.environ['PYTHONPATH'] = '.'
+
     if ensemble:
-        command = [ 'accelerate', 'launch', 'facechain/train_text_to_image_lora.py',
-                    f'--pretrained_model_name_or_path={base_model_path}',
-                    f'--output_dataset_name={output_img_dir}',
+        if platform.system() == 'Windows':
+            command = [
+                'accelerate', 'launch', 'facechain/train_text_to_image_lora.py',
+                f'--pretrained_model_name_or_path={base_model_path}',
+                f'--output_dataset_name={output_img_dir}',
                     f'--caption_column=text',
                     f'--resolution=512',
                     f'--random_flip',
@@ -119,13 +123,13 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
                     f'--sub_path={sub_path}',
                     f'--validation_steps=100 '
                    ]
-        if platform.system() == 'Windows':
+
             try:
                 subprocess.run(command, check=True)
             except subprocess.CalledProcessError as e:
                 print(f"Error executing the command: {e}")
         else:
-            os.system(f'PYTHONPATH=.  {command}')
+            os.system(f'  {command}')
     else:
         command = [
             'accelerate', 'launch', 'facechain/train_text_to_image_lora.py',
@@ -156,7 +160,7 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
             except subprocess.CalledProcessError as e:
                 print(f"Error executing the command: {e}")
         else:
-            os.system(f'PYTHONPATH=.  {command}')
+            os.system(f'{command}')
 
 def generate_pos_prompt(style_model, prompt_cloth):
     if style_model == styles[0]['name'] or style_model is None:
@@ -372,12 +376,20 @@ def launch_pipeline_inpaint(uuid,
 
 #######save out put img function
 def save_images(outputs):
+    # 读取配置文件，是否要保存图片
+    with open('config.json', 'r') as config_file:
+        config = json.load(config_file)
+    save_img_flag = config['save_img_flag']
+    if not save_img_flag:
+        return
     # 获取当前日期,创建日期文件夹
     today = datetime.date.today()
     if platform.system() == 'Windows':
-        date_path = os.path.join('c:\\tmp\\fcoutput', today.strftime('%Y%m%d'))
+        tmp_path = config['tmp_path']['windows']
+        date_path = os.path.join(tmp_path,'fcoutput', today.strftime('%Y%m%d'))
     else:
-        date_path = os.path.join('/tmp/fcoutput', today.strftime('%Y%m%d'))
+        tmp_path = config['tmp_path']['linux']
+        date_path = os.path.join(tmp_path,'fcoutput', today.strftime('%Y%m%d'))
     if not os.path.exists(date_path):
         os.makedirs(date_path)
 
