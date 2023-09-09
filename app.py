@@ -14,6 +14,8 @@ from glob import glob
 import platform
 import subprocess
 from modelscope import snapshot_download
+import json
+import datetime
 
 from facechain.inference import GenPortrait
 from facechain.inference_inpaint import GenPortraitInpaint
@@ -91,24 +93,57 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
     lora_alpha = 32 if not enhance_lora else 64
     max_train_steps = min(photo_num * 200, 800)
     if ensemble:
-        os.system(
-            f'''
-                PYTHONPATH=. accelerate launch facechain/train_text_to_image_lora.py \
-                --pretrained_model_name_or_path="{base_model_path}" \
-                --output_dataset_name="{output_img_dir}" \
-                --caption_column="text" --resolution=512 \
-                --random_flip --train_batch_size=1 --gradient_accumulation_steps=4 --max_train_steps={max_train_steps} --checkpointing_steps=100 \
-                --learning_rate=1e-04 --lr_scheduler="constant" --lr_warmup_steps=0 --seed=42 --output_dir="{work_dir}" \
-                --lora_r={lora_r} --lora_alpha={lora_alpha} \
-                --validation_prompt="{validation_prompt}" \
-                --validation_steps=100 \
-                --template_dir="resources/inpaint_template" \
-                --template_mask \
-                --merge_best_lora_based_face_id \
-                --revision="{revision}" \
-                --sub_path="{sub_path}" \
-            '''
-        )
+        if platform.system() == 'Windows':
+            command = [
+                'accelerate', 'launch', 'facechain/train_text_to_image_lora.py',
+                f'--pretrained_model_name_or_path={base_model_path}',
+                f'--output_dataset_name={output_img_dir}',
+                f'--caption_column=text',
+                f'--resolution=512',
+                f'--random_flip',
+                f'--train_batch_size=1',
+                f'--gradient_accumulation_steps=4',
+                f'--max_train_steps={max_train_steps}',
+                f'--checkpointing_steps=100',
+                f'--learning_rate=1e-04',
+                f'--lr_scheduler=constant',
+                f'--lr_warmup_steps=0',
+                f'--seed=42',
+                f'--output_dir={work_dir}',
+                f'--lora_r={lora_r}',
+                f'--lora_alpha={lora_alpha}',
+                f'--validation_prompt={validation_prompt}',
+                f'--template_dir=resources/inpaint_template',
+                f'--template_mask',
+                f'--merge_best_lora_based_face_id',
+                f'--revision={revision}',
+                f'--sub_path={sub_path}',
+                f'--validation_steps=100 '
+            ]
+
+            try:
+                subprocess.run(command, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Error executing the command: {e}")
+        else:
+            os.system(
+                f'''
+                    PYTHONPATH=. accelerate launch facechain/train_text_to_image_lora.py \
+                    --pretrained_model_name_or_path="{base_model_path}" \
+                    --output_dataset_name="{output_img_dir}" \
+                    --caption_column="text" --resolution=512 \
+                    --random_flip --train_batch_size=1 --gradient_accumulation_steps=4 --max_train_steps={max_train_steps} --checkpointing_steps=100 \
+                    --learning_rate=1e-04 --lr_scheduler="constant" --lr_warmup_steps=0 --seed=42 --output_dir="{work_dir}" \
+                    --lora_r={lora_r} --lora_alpha={lora_alpha} \
+                    --validation_prompt="{validation_prompt}" \
+                    --validation_steps=100 \
+                    --template_dir="resources/inpaint_template" \
+                    --template_mask \
+                    --merge_best_lora_based_face_id \
+                    --revision="{revision}" \
+                    --sub_path="{sub_path}" \
+                '''
+            )
     else:
         if platform.system() == 'Windows':
             command = [
@@ -132,7 +167,7 @@ def train_lora_fn(base_model_path=None, revision=None, sub_path=None, output_img
                 f'--lora_alpha={lora_alpha}',
                 '--lora_text_encoder_r=32',
                 '--lora_text_encoder_alpha=32',
-                '--resume_from_checkpoint="fromfacecommon"'
+                '--resume_from_checkpoint=fromfacecommon'
             ]
 
             try:
@@ -241,10 +276,16 @@ def launch_pipeline(uuid,
     use_post_process = True
     use_stylization = False
 
-    instance_data_dir = os.path.join('/tmp', uuid, 'training_data', base_model, user_model)
-    lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/ensemble'
-    if not os.path.exists(lora_model_path):
-        lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/'
+    if platform.system() == 'Windows':
+        instance_data_dir = os.path.join('C:\\tmp', uuid, 'training_data', base_model, user_model)
+        lora_model_path = os.path.join('C:\\tmp', uuid, base_model, user_model,'ensemble')
+        if not os.path.exists(lora_model_path):
+            lora_model_path = os.path.join('C:\\tmp', uuid, base_model, user_model)
+    else:
+        instance_data_dir = os.path.join('/tmp', uuid, 'training_data', base_model, user_model)
+        lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/ensemble'
+        if not os.path.exists(lora_model_path):
+            lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/'
 
     train_file = os.path.join(lora_model_path, 'pytorch_lora_weights.bin')
     if not os.path.exists(train_file):
@@ -278,6 +319,7 @@ def launch_pipeline(uuid,
         outputs_RGB.append(cv2.cvtColor(out_tmp, cv2.COLOR_BGR2RGB))
     image_path = './lora_result.png'
     if len(outputs) > 0:
+        save_images(outputs_RGB)
         result = concatenate_images(outputs)
         cv2.imwrite(image_path, result)
 
@@ -322,21 +364,26 @@ def launch_pipeline_inpaint(uuid,
     revision = base_models[base_model_index]['revision']
     sub_path = base_models[base_model_index]['sub_path']
     output_model_name = 'personalization_lora'
-    instance_data_dir = os.path.join('/tmp', uuid, 'training_data', base_model, user_model)
 
-    # we use ensemble model, if not exists fallback to original lora
-    lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/ensemble/'
-    if not os.path.exists(lora_model_path):
-        lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/'
+    if platform.system() == 'Windows':
+        instance_data_dir = os.path.join('C:\\tmp', uuid, 'training_data', base_model, user_model)
+        lora_model_path = os.path.join('C:\\tmp', uuid, base_model, user_model, 'ensemble')
+        if not os.path.exists(lora_model_path):
+            lora_model_path = os.path.join('C:\\tmp', uuid, base_model, user_model)
+    else:
+        instance_data_dir = os.path.join('/tmp', uuid, 'training_data', base_model, user_model)
+        lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/ensemble'
+        if not os.path.exists(lora_model_path):
+            lora_model_path = f'/tmp/{uuid}/{base_model}/{user_model}/'
 
     gen_portrait_inpaint = GenPortraitInpaint(crop_template=False, short_side_resize=512)
     
     cache_model_dir = snapshot_download("bubbliiiing/controlnet_helper", revision="v2.2")
 
     with ProcessPoolExecutor(max_workers=5) as executor:
-        future = executor.submit(gen_portrait_inpaint, base_model, lora_model_path, instance_data_dir, \
-                                 selected_template_images, cache_model_dir, select_face_num, first_control_weight, \
-                                 second_control_weight, final_fusion_ratio, use_fusion_before, use_fusion_after, \
+        future = executor.submit(gen_portrait_inpaint, base_model, lora_model_path, instance_data_dir,
+                                 selected_template_images, cache_model_dir, select_face_num, first_control_weight,
+                                 second_control_weight, final_fusion_ratio, use_fusion_before, use_fusion_after,
                                  sub_path=sub_path, revision=revision)
 
         while not future.done():
@@ -356,6 +403,7 @@ def launch_pipeline_inpaint(uuid,
         outputs_RGB.append(cv2.cvtColor(out_tmp, cv2.COLOR_BGR2RGB))
     image_path = './lora_result.png'
     if len(outputs) > 0:
+        save_images(outputs_RGB)
         result = concatenate_images(outputs)
         cv2.imwrite(image_path, result)
 
@@ -363,6 +411,34 @@ def launch_pipeline_inpaint(uuid,
     else:
         yield ["生成失败，请重试(Generation failed, please retry)！", outputs_RGB]
 
+#######save out put img function
+def save_images(outputs):
+    # 读取配置文件，是否要保存图片
+    with open('config.json', 'r') as config_file:
+        config = json.load(config_file)
+    save_img_flag = config['save_img_flag']
+    if not save_img_flag:
+        return
+    # 获取当前日期,创建日期文件夹
+    today = datetime.date.today()
+    if platform.system() == 'Windows':
+        tmp_path = config['tmp_path']['windows']
+        date_path = os.path.join(tmp_path,'fcoutput', today.strftime('%Y%m%d'))
+    else:
+        tmp_path = config['tmp_path']['linux']
+        date_path = os.path.join(tmp_path,'fcoutput', today.strftime('%Y%m%d'))
+    if not os.path.exists(date_path):
+        os.makedirs(date_path)
+
+    # 计数器,用于命名文件
+    count = 1
+    for image in outputs:
+        # 构造文件名
+        filename = '{}_{}.png'.format(time.strftime("%Y%m%d%H%M%S"), str(count).zfill(3))
+        image_path = os.path.join(date_path, filename)
+        # 保存图像
+        cv2.imwrite(image_path, image)
+        count += 1
 
 class Trainer:
     def __init__(self):
@@ -406,12 +482,17 @@ class Trainer:
         output_model_name = slugify.slugify(output_model_name)
 
         # mv user upload data to target dir
-        instance_data_dir = os.path.join('/tmp', uuid, 'training_data', base_model_path, output_model_name)
-        print("--------uuid: ", uuid)
 
-        if not os.path.exists(f"/tmp/{uuid}"):
-            os.makedirs(f"/tmp/{uuid}")
-        work_dir = f"/tmp/{uuid}/{base_model_path}/{output_model_name}"
+        if platform.system() == 'Windows':
+            instance_data_dir = os.path.join('C:\\tmp', uuid, 'training_data', base_model_path, output_model_name)
+            if not os.path.exists(os.path.join('C:\\tmp', uuid)):
+                os.makedirs(os.path.join('C:\\tmp', uuid))
+            work_dir = os.path.join("c:\\tmp", uuid, base_model_path, output_model_name)
+        else:
+            instance_data_dir = os.path.join('/tmp', uuid, 'training_data', base_model_path, output_model_name)
+            if not os.path.exists(f"/tmp/{uuid}"):
+                os.makedirs(f"/tmp/{uuid}")
+            work_dir = f"/tmp/{uuid}/{base_model_path}/{output_model_name}"
 
         if os.path.exists(work_dir):
             raise gr.Error("产出模型名称已存在。")
@@ -450,6 +531,10 @@ def flash_model_list(uuid, base_model_index):
             uuid = 'qw'
 
     folder_path = f"/tmp/{uuid}/{base_model_path}"
+    if platform.system() == 'Windows':
+        folder_path = os.path.join('C:\\tmp', uuid, base_model_path)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
     folder_list = []
     if not os.path.exists(folder_path):
         return gr.Radio.update(choices=[]),gr.Dropdown.update(choices=style_list)
@@ -471,6 +556,7 @@ def update_output_model(uuid, base_model_index):
         raise gr.Error('请选择基模型(Please select the base model)！')
 
     base_model_path = base_models[base_model_index]['model_id']
+    style_list = base_models[base_model_index]['style_list']
 
     if not uuid:
         if os.getenv("MODELSCOPE_ENVIRONMENT") == 'studio':
@@ -479,6 +565,10 @@ def update_output_model(uuid, base_model_index):
             uuid = 'qw'
 
     folder_path = f"/tmp/{uuid}/{base_model_path}"
+    if platform.system() == 'Windows':
+        folder_path = os.path.join('C:\\tmp', uuid, base_model_path)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
     folder_list = []
     if not os.path.exists(folder_path):
         return gr.Radio.update(choices=[]),gr.Dropdown.update(choices=style_list)
@@ -787,4 +877,4 @@ with gr.Blocks(css='style.css') as demo:
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn')
-    demo.queue(status_update_rate=1).launch(share=True)
+    demo.queue(status_update_rate=1).launch(server_name="0.0.0.0",server_port=7870,share=True)
